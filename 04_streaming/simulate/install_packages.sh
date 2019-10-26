@@ -1,2 +1,2 @@
 #!/bin/bash
-sudo python3 -m pip install --upgrade timezonefinder pytz 'apache-beam[gcp]'
+sudo pip install google-cloud-dataflow timezonefinder pytz

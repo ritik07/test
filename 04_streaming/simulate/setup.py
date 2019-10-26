@@ -76,14 +76,14 @@ class CustomCommands(setuptools.Command):
     pass
 
   def RunCustomCommand(self, command_list):
-    print ('Running command: %s' % command_list)
+    print 'Running command: %s' % command_list
     p = subprocess.Popen(
         command_list,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     # Can use communicate(input='y\n'.encode()) if the command run requires
     # some confirmation.
     stdout_data, _ = p.communicate()
-    print ('Command output: %s' % stdout_data)
+    print 'Command output: %s' % stdout_data
     if p.returncode != 0:
       raise RuntimeError(
           'Command %s failed: exit code: %s' % (command_list, p.returncode))
@@ -98,7 +98,7 @@ class CustomCommands(setuptools.Command):
 # so this dependency will not trigger anything to be installed unless a version
 # restriction is specified.
 REQUIRED_PACKAGES = [
-    'timezonefinder==3.0.0',
+    'timezonefinder',
     'pytz'
     ]
 

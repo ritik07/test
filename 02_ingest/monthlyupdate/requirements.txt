@@ -1,2 +1,3 @@
-Flask
-google-cloud-storage
+Flask==0.11.1
+gunicorn==19.6.0
+google-cloud-storage==0.21.0

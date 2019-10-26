@@ -1,14 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 from googleapiclient import discovery
 from oauth2client.client import GoogleCredentials
-import argparse
 import json
-
-parser = argparse.ArgumentParser()
-parser.add_argument("-p", "--project", required=True,
-                    help="Project that flights service is deployed in")
-args = parser.parse_args()
 
 credentials = GoogleCredentials.get_application_default()
 api = discovery.build('ml', 'v1', credentials=credentials,
@@ -39,31 +33,10 @@ request_data = {'instances':
   ]
 }
 
-PROJECT = args.project
-parent = 'projects/%s/models/%s/versions/%s' % (PROJECT, 'flights', 'tf2')
+PROJECT = 'cloud-training-demos'
+parent = 'projects/%s/models/%s/versions/%s' % (PROJECT, 'flights', 'v1')
 response = api.projects().predict(body=request_data, name=parent).execute()
-print("response={}".format(response))
+print "response={0}".format(response)
 
-probs = [pred[u'pred'][0] for pred in response[u'predictions']]
-print("probs={}".format(probs))
-
-# find the maximal impact variable
-max_impact = 0.3  # unless impact of var > 0.3, we'll go with 'typical'
-max_impact_factor =  0
-for factor in range(1, len(probs)):
-   impact = abs(probs[factor] - probs[0])
-   if impact > max_impact:
-      max_impact = impact
-      max_impact_factor = factor
-
-reasons = ["this flight appears rather typical",
-           "the departure delay is typically 13.3 minutes",
-           "the taxiout time is typically 16.0 minutes",
-           "the avg_arrival_delay is typically 4 minutes"]
-
-print("\n\nThe ontime probability={}; the key reason is that {} {}".format(
-           probs[0],
-           reasons[max_impact_factor],
-           "-- had it been typical, the ontime probability would have been {}".format(probs[max_impact_factor]) if max_impact_factor > 0 else ""
-      ))
-
+probs = [pred[u'probabilities'][1] for pred in response[u'predictions']]
+print "probs={0}".format(probs)

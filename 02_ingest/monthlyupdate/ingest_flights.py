@@ -21,21 +21,9 @@ import os.path
 import zipfile
 import datetime
 import tempfile
+from urllib2 import urlopen
 from google.cloud import storage
 from google.cloud.storage import Blob
-
-try:
-    from urllib.request import urlopen as impl
-    # For Python 3.0 and later
-    def urlopen(url, data):
-        return impl(url, data.encode('utf-8'))
-    def remove_quote(text):
-        return text.translate(str.maketrans('','', '"'))
-except ImportError as error:
-    # Fall back to Python 2's urllib2
-    from urllib2 import urlopen
-    def remove_quote(text):
-        return text.translate(None, '"')
 
 def download(YEAR, MONTH, destdir):
    '''
@@ -75,20 +63,20 @@ class UnexpectedFormat(Exception):
    def __init__(self, message):
       self.message = message
 
-def verify_ingest(csvfile):
+def verify_ingest(outfile):
    expected_header = 'FL_DATE,UNIQUE_CARRIER,AIRLINE_ID,CARRIER,FL_NUM,ORIGIN_AIRPORT_ID,ORIGIN_AIRPORT_SEQ_ID,ORIGIN_CITY_MARKET_ID,ORIGIN,DEST_AIRPORT_ID,DEST_AIRPORT_SEQ_ID,DEST_CITY_MARKET_ID,DEST,CRS_DEP_TIME,DEP_TIME,DEP_DELAY,TAXI_OUT,WHEELS_OFF,WHEELS_ON,TAXI_IN,CRS_ARR_TIME,ARR_TIME,ARR_DELAY,CANCELLED,CANCELLATION_CODE,DIVERTED,DISTANCE'
 
-   with open(csvfile, 'r') as csvfp:
-      firstline = csvfp.readline().strip()
+   with open(outfile, 'r') as outfp:
+      firstline = outfp.readline().strip()
       if (firstline != expected_header):
-         os.remove(csvfile)
+         os.remove(outfile)
          msg = 'Got header={}, but expected={}'.format(
                              firstline, expected_header)
          logging.error(msg)
          raise UnexpectedFormat(msg)
 
-      if next(csvfp, None) == None:
-         os.remove(csvfile)
+      if next(outfp, None) == None:
+         os.remove(outfile)
          msg = ('Received a file from BTS that has only the header and no content')
          raise DataUnavailable(msg)
 
@@ -103,8 +91,7 @@ def remove_quotes_comma(csvfile, year, month):
    with open(csvfile, 'r') as infp:
      with open(outfile, 'w') as outfp:
         for line in infp:
-           outline = line.rstrip().rstrip(',')
-           outline = remove_quote(outline)
+           outline = line.rstrip().rstrip(',').translate(None, '"')
            outfp.write(outline)
            outfp.write('\n')
    logging.debug('Ingested {} ...'.format(outfile))

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 # Copyright 2016 Google Inc.
 #
@@ -41,7 +41,7 @@ def as_utc(date, hhmm, tzone):
       else:
          return '',0 # empty string corresponds to canceled flights
    except ValueError as e:
-      print ('{} {} {}'.format(date, hhmm, tzone))
+      print '{} {} {}'.format(date, hhmm, tzone)
       raise e
 
 def add_24h_if_before(arrtime, deptime):
@@ -53,19 +53,14 @@ def add_24h_if_before(arrtime, deptime):
    else:
       return arrtime
 
-def tz_correct(line, airport_timezones_dict):
-   def airport_timezone(airport_id):
-       if airport_id in airport_timezones_dict:
-          return airport_timezones_dict[airport_id]
-       else:
-          return ('37.52', '-92.17', u'America/Chicago') # population center of US
+def tz_correct(line, airport_timezones):
    fields = line.split(',')
    if fields[0] != 'FL_DATE' and len(fields) == 27:
       # convert all times to UTC
       dep_airport_id = fields[6]
       arr_airport_id = fields[10]
-      dep_timezone = airport_timezone(dep_airport_id)[2] 
-      arr_timezone = airport_timezone(arr_airport_id)[2]
+      dep_timezone = airport_timezones[dep_airport_id][2] 
+      arr_timezone = airport_timezones[arr_airport_id][2]
       
       for f in [13, 14, 17]: #crsdeptime, deptime, wheelsoff
          fields[f], deptz = as_utc(fields[0], fields[f], dep_timezone)
@@ -75,9 +70,9 @@ def tz_correct(line, airport_timezones_dict):
       for f in [17, 18, 20, 21]:
          fields[f] = add_24h_if_before(fields[f], fields[14])
 
-      fields.extend(airport_timezone(dep_airport_id))
+      fields.extend(airport_timezones[dep_airport_id])
       fields[-1] = str(deptz)
-      fields.extend(airport_timezone(arr_airport_id))
+      fields.extend(airport_timezones[arr_airport_id])
       fields[-1] = str(arrtz)
 
       yield fields
@@ -109,7 +104,7 @@ def create_row(fields):
     featdict['EVENT_DATA'] = ','.join(fields)
     return featdict
  
-def run(project, bucket, dataset):
+def run(project, bucket):
    argv = [
       '--project={0}'.format(project),
       '--job_name=ch04timecorr',
@@ -117,14 +112,14 @@ def run(project, bucket, dataset):
       '--staging_location=gs://{0}/flights/staging/'.format(bucket),
       '--temp_location=gs://{0}/flights/temp/'.format(bucket),
       '--setup_file=./setup.py',
-      '--max_num_workers=8',
+      '--max_num_workers=10',
       '--autoscaling_algorithm=THROUGHPUT_BASED',
       '--runner=DataflowRunner'
    ]
    airports_filename = 'gs://{}/flights/airports/airports.csv.gz'.format(bucket)
    flights_raw_files = 'gs://{}/flights/raw/*.csv'.format(bucket)
    flights_output = 'gs://{}/flights/tzcorr/all_flights'.format(bucket)
-   events_output = '{}:{}.simevents'.format(project, dataset)
+   events_output = '{}:flights.simevents'.format(project)
 
    pipeline = beam.Pipeline(argv=argv)
    
@@ -135,7 +130,7 @@ def run(project, bucket, dataset):
    )
 
    flights = (pipeline 
-      | 'flights:read' >> beam.io.ReadFromText (flights_raw_files)
+      | 'flights:read' >> beam.Read(beam.io.TextFileSource(flights_raw_files))
       | 'flights:tzcorr' >> beam.FlatMap(tz_correct, beam.pvalue.AsDict(airports))
    )
 
@@ -150,22 +145,13 @@ def run(project, bucket, dataset):
 
    (events 
       | 'events:totablerow' >> beam.Map(lambda fields: create_row(fields)) 
-      | 'events:out' >> beam.io.WriteToBigQuery(
+      | 'events:out' >> beam.io.Write(beam.io.BigQuerySink(
                               events_output, schema=schema,
                               write_disposition=beam.io.BigQueryDisposition.WRITE_TRUNCATE,
-                              create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED)
+                              create_disposition=beam.io.BigQueryDisposition.CREATE_IF_NEEDED))
    )
 
    pipeline.run()
 
 if __name__ == '__main__':
-   import argparse
-   parser = argparse.ArgumentParser(description='Run pipeline on the cloud')
-   parser.add_argument('-p','--project', help='Unique project ID', required=True)
-   parser.add_argument('-b','--bucket', help='Bucket where your data were ingested in Chapter 2', required=True)
-   parser.add_argument('-d','--dataset', help='BigQuery dataset', default='flights')
-   args = vars(parser.parse_args())
-
-   print ("Correcting timestamps and writing to BigQuery dataset {}".format(args['dataset']))
-  
-   run(project=args['project'], bucket=args['bucket'], dataset=args['dataset'])
+   run(project='cloud-training-demos', bucket='cloud-training-demos-ml')

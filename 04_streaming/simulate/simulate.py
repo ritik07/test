@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 # Copyright 2016 Google Inc.
 #
@@ -23,19 +23,18 @@ from google.cloud import pubsub
 import google.cloud.bigquery as bq
 
 TIME_FORMAT = '%Y-%m-%d %H:%M:%S %Z'
-RFC3339_TIME_FORMAT = '%Y-%m-%dT%H:%M:%S-00:00'
 
-def publish(publisher, topics, allevents, notify_time):
-   timestamp = notify_time.strftime(RFC3339_TIME_FORMAT)
+def publish(topics, allevents, notify_time):
+   timestamp = notify_time.strftime(TIME_FORMAT)
    for key in topics:  # 'departed', 'arrived', etc.
       topic = topics[key]
       events = allevents[key]
-      # the client automatically batches
-      logging.info('Publishing {} {} till {}'.format(len(events), key, timestamp))
-      for event_data in events:
-          publisher.publish(topic, event_data.encode(), EventTimeStamp=timestamp)
+      with topic.batch() as batch:
+         logging.info('Publishing {} {} events'.format(len(events), key))
+         for event_data in events:
+              batch.publish(event_data, EventTimeStamp=timestamp)
 
-def notify(publisher, topics, rows, simStartTime, programStart, speedFactor):
+def notify(topics, rows, simStartTime, programStart, speedFactor):
    # sleep computation
    def compute_sleep_secs(notify_time):
         time_elapsed = (datetime.datetime.utcnow() - programStart).seconds
@@ -53,7 +52,7 @@ def notify(publisher, topics, rows, simStartTime, programStart, speedFactor):
        # how much time should we sleep?
        if compute_sleep_secs(notify_time) > 1:
           # notify the accumulated tonotify
-          publish(publisher, topics, tonotify, notify_time)
+          publish(topics, tonotify, notify_time)
           for key in topics:
              tonotify[key] = list()
 
@@ -65,62 +64,80 @@ def notify(publisher, topics, rows, simStartTime, programStart, speedFactor):
        tonotify[event].append(event_data)
 
    # left-over records; notify again
-   publish(publisher, topics, tonotify, notify_time)
+   publish(topics, tonotify, notify_time)
 
 
 if __name__ == '__main__':
    parser = argparse.ArgumentParser(description='Send simulated flight events to Cloud Pub/Sub')
    parser.add_argument('--startTime', help='Example: 2015-05-01 00:00:00 UTC', required=True)
    parser.add_argument('--endTime', help='Example: 2015-05-03 00:00:00 UTC', required=True)
-   parser.add_argument('--project', help='your project id, to create pubsub topic', required=True)
    parser.add_argument('--speedFactor', help='Example: 60 implies 1 hour of data sent to Cloud Pub/Sub in 1 minute', required=True, type=float)
-   parser.add_argument('--jitter', help='type of jitter to add: None, uniform, exp  are the three options', default='None')
 
    # set up BigQuery bqclient
    logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
    args = parser.parse_args()
-   bqclient = bq.Client(args.project)
-   dataset =  bqclient.get_dataset( bqclient.dataset('flights') )  # throws exception on failure
-
-   # jitter?
-   if args.jitter == 'exp':
-      jitter = 'CAST (-LN(RAND()*0.99 + 0.01)*30 + 90.5 AS INT64)'
-   elif args.jitter == 'uniform':
-      jitter = 'CAST(90.5 + RAND()*30 AS INT64)'
-   else:
-      jitter = '0'
-
-
+   bqclient = bq.Client()
+   dataset = bqclient.dataset('flights')
+   if not dataset.exists():
+      logging.error('Did not find a dataset named <flights> in your project')
+      exit(-1)
+  
    # run the query to pull simulated events
-   querystr = """
+   querystr = """\
 SELECT
   EVENT,
-  TIMESTAMP_ADD(NOTIFY_TIME, INTERVAL {} SECOND) AS NOTIFY_TIME,
+  NOTIFY_TIME,
   EVENT_DATA
 FROM
-  flights.simevents
+  `cloud-training-demos.flights.simevents`
 WHERE
   NOTIFY_TIME >= TIMESTAMP('{}')
   AND NOTIFY_TIME < TIMESTAMP('{}')
 ORDER BY
   NOTIFY_TIME ASC
 """
-   rows = bqclient.query(querystr.format(jitter,
-                                         args.startTime,
-                                         args.endTime))
+   query = bqclient.run_sync_query(querystr.format(args.startTime,
+                                                 args.endTime))
+   query.use_legacy_sql = False # standard SQL
+   query.timeout_ms = 2000
+   query.max_results = 1000  # at a time
+   query.run()
+
+   # wait for query to complete and fetch first page of data
+   if query.complete:
+      rows = query.rows
+      token = query.page_token
+   else:
+      logging.error('Query timed out ... retrying ...')
+      job = query.job
+      job.reload()
+      retry_count = 0
+      while retry_count < 5 and job.state != u'DONE':
+         time.sleep(1.5**retry_count)
+         retry_count += 1
+         logging.error('... retrying {}'.format(retry_count))
+         job.reload()
+      if job.state != u'DONE':
+         logging.error('Job failed')
+         logging.error(query.errors)
+         exit(-1)
+      rows, total_count, token = query.fetch_data()
 
    # create one Pub/Sub notification topic for each type of event
-   publisher = pubsub.PublisherClient()
+   psclient = pubsub.Client()
    topics = {}
    for event_type in ['wheelsoff', 'arrived', 'departed']:
-       topics[event_type] = publisher.topic_path(args.project, event_type)
-       try:
-          publisher.get_topic(topics[event_type])
-       except:
-          publisher.create_topic(topics[event_type])
-
+       topics[event_type] = psclient.topic(event_type)
+       if not topics[event_type].exists():
+          topics[event_type].create()
+   
    # notify about each row in the dataset
-   programStartTime = datetime.datetime.utcnow()
+   programStartTime = datetime.datetime.utcnow() 
    simStartTime = datetime.datetime.strptime(args.startTime, TIME_FORMAT).replace(tzinfo=pytz.UTC)
-   print('Simulation start time is {}'.format(simStartTime))
-   notify(publisher, topics, rows, simStartTime, programStartTime, args.speedFactor)
+   print 'Simulation start time is {}'.format(simStartTime)
+   while True:
+      notify(topics, rows, simStartTime, programStartTime, args.speedFactor)
+      if token is None:
+         break
+      rows, total_count, token = query.fetch_data(page_token=token)
+      

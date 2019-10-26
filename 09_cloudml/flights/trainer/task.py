@@ -16,20 +16,23 @@
 """
 
 import argparse
-import logging
+import model
 import json
 import os
 
 import tensorflow as tf
-from . import model
+from tensorflow.contrib.learn.python.learn import learn_runner
 
 if __name__ == '__main__':
-  print("Using TensorFlow version: {}".format(tf.version.VERSION))
   parser = argparse.ArgumentParser()
-
   parser.add_argument(
-      '--bucket',
-      help='Training data will be in gs://BUCKET/flights/chapter8/output/',
+      '--traindata',
+      help='Training data can have wildcards',
+      required=True
+  )
+  parser.add_argument(
+      '--evaldata',
+      help='Training data can have wildcards',
       required=True
   )
   parser.add_argument(
@@ -38,17 +41,23 @@ if __name__ == '__main__':
       default='./junk'
   )
   parser.add_argument(
-      '--num_examples',
-      help='Number of examples to train on; this could be size-of-data X number-epochs',
-      default=1000000
+      '--output_dir',
+      help='Output directory',
+      required=True
+  )
+  parser.add_argument(
+      '--num_training_epochs',
+      help='Number of passes through training dataset',
+      type=int,
+      default=10
   )
 
   # for hyper-parameter tuning
   parser.add_argument(
-      '--train_batch_size',
+      '--batch_size',
       help='Number of examples to compute gradient on',
       type=int,
-      default=64
+      default=100
   )
   parser.add_argument(
       '--nbuckets',
@@ -57,16 +66,15 @@ if __name__ == '__main__':
       default=5
   )
   parser.add_argument(
-      '--dnn_hidden_units',
+      '--hidden_units',
       help='Architecture of DNN part of wide-and-deep network',
-      default='32,4'
+      default='64,64,64,16,4'
   )
-
-  # step-by-step build of what's in the chapter text
   parser.add_argument(
-      '--func',
-      help='read_lines find_average_label linear OR wide_deep (default)',
-      default='train_and_evaluate'
+      '--learning_rate',
+      help='Controls size of step in gradient descent.',
+      type=float,
+      default=0.0606
   )
 
   # parse args
@@ -76,10 +84,8 @@ if __name__ == '__main__':
   # unused args provided by service
   arguments.pop('job-dir', None)
   arguments.pop('job_dir', None)
-    
-  # set appropriate output directory
-  BUCKET = arguments['bucket']
-  output_dir='gs://{}/flights/trained_model'.format(BUCKET)
+  output_dir = arguments.pop('output_dir')
+
   # when hp-tuning, we need to use different output directories for different runs
   output_dir = os.path.join(
       output_dir,
@@ -87,20 +93,8 @@ if __name__ == '__main__':
           os.environ.get('TF_CONFIG', '{}')
       ).get('task', {}).get('trial', '')
   )
-  print('Writing trained model to {}'.format(output_dir))
-  arguments['output_dir'] = output_dir
  
 
   # run
-  logging.basicConfig(level=logging.INFO)
-  model.setup(arguments)
-
-  func_to_call = arguments['func']
-
-  if func_to_call == 'read_lines':
-    model.read_lines()
-  elif func_to_call == 'find_average_label':
-    model.find_average_label()
-  else:  # linear, wide_deep
-    model.train_and_evaluate(func_to_call)
-                          
+  tf.logging.set_verbosity(tf.logging.INFO)
+  learn_runner.run(model.make_experiment_fn(**arguments), output_dir)

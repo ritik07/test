@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 # Copyright 2016 Google Inc.
 #
@@ -29,14 +29,14 @@ def addtimezone(lat, lon):
       return (lat, lon, 'TIMEZONE') # header
 
 if __name__ == '__main__':
-   with beam.Pipeline('DirectRunner') as pipeline:
+   pipeline = beam.Pipeline('DirectRunner')
 
-      airports = (pipeline
-         | beam.io.ReadFromText('airports.csv.gz')
-         | beam.Map(lambda line: next(csv.reader([line])))
-         | beam.Map(lambda fields: (fields[0], addtimezone(fields[21], fields[26])))
-      )
+   airports = (pipeline 
+      | beam.io.ReadFromText('airports.csv.gz')
+      | beam.Map(lambda line: next(csv.reader([line])))
+      | beam.Map(lambda fields: (fields[0], addtimezone(fields[21], fields[26])))
+   )
 
-      airports | beam.Map(lambda f: '{},{}'.format(f[0], ','.join(f[1])) )| beam.io.textio.WriteToText('airports_with_tz')
+   airports | beam.Map(lambda (airport, data): '{},{}'.format(airport, ','.join(data)) )| beam.io.textio.WriteToText('airports_with_tz')
 
-      pipeline.run()
+   pipeline.run()

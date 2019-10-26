@@ -19,10 +19,16 @@ package com.google.cloud.training.flights;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.beam.runners.dataflow.options.DataflowPipelineOptions;
+import org.joda.time.Duration;
+
+import com.google.api.services.bigquery.model.TableFieldSchema;
+import com.google.api.services.bigquery.model.TableRow;
+import com.google.api.services.bigquery.model.TableSchema;
 import org.apache.beam.sdk.Pipeline;
+import org.apache.beam.sdk.coders.StringUtf8Coder;
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO;
-import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
+import org.apache.beam.sdk.io.PubsubIO;
+import org.apache.beam.runners.dataflow.options.DataflowPipelineOptions;
 import org.apache.beam.sdk.options.Default;
 import org.apache.beam.sdk.options.Description;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
@@ -39,11 +45,6 @@ import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.TupleTag;
-import org.joda.time.Duration;
-
-import com.google.api.services.bigquery.model.TableFieldSchema;
-import com.google.api.services.bigquery.model.TableRow;
-import com.google.api.services.bigquery.model.TableSchema;
 
 /**
  * A dataflow pipeline that listens to a PubSub topic and writes out aggregates
@@ -143,7 +144,7 @@ public class AverageDelayPipeline {
 					}
 				}))//
 				.apply("airport:write_toBQ",
-						BigQueryIO.writeTableRows().to(outputTable) //
+						BigQueryIO.Write.to(outputTable) //
 								.withSchema(schema)//
 								.withWriteDisposition(BigQueryIO.Write.WriteDisposition.WRITE_APPEND)
 								.withCreateDisposition(BigQueryIO.Write.CreateDisposition.CREATE_IF_NEEDED));
@@ -171,7 +172,7 @@ public class AverageDelayPipeline {
 		final FieldNumberLookup eventType = FieldNumberLookup.create(event);
 		PCollection<Flight> flights = p //
 				.apply(event + ":read", //
-						PubsubIO.readStrings().fromTopic(topic)) //
+						PubsubIO.<String>read().topic(topic).withCoder(StringUtf8Coder.of())) //
 				.apply(event + ":window",
 						Window.into(SlidingWindows//
 								.of(averagingInterval)//

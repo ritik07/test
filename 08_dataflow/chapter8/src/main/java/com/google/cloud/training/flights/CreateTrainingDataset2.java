@@ -52,7 +52,7 @@ public class CreateTrainingDataset2 {
     Pipeline p = Pipeline.create(options);
 
     p //
-        .apply("ReadLines", TextIO.read().from(options.getInput())) //
+        .apply("ReadLines", TextIO.Read.from(options.getInput())) //
         .apply("FilterMIA", ParDo.of(new DoFn<String, String>() {
 
           @ProcessElement
@@ -64,7 +64,7 @@ public class CreateTrainingDataset2 {
           }
         })) //
         .apply("WriteFlights", //
-            TextIO.write().to(options.getOutput() + "flights2") //
+            TextIO.Write.to(options.getOutput() + "flights2") //
                 .withSuffix(".txt").withoutSharding());
 
     p.run();

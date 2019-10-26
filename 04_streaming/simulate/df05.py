@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 # Copyright 2016 Google Inc.
 #
@@ -41,7 +41,7 @@ def as_utc(date, hhmm, tzone):
       else:
          return '',0 # empty string corresponds to canceled flights
    except ValueError as e:
-      print ('{} {} {}'.format(date, hhmm, tzone))
+      print '{} {} {}'.format(date, hhmm, tzone)
       raise e
 
 def add_24h_if_before(arrtime, deptime):
@@ -88,34 +88,34 @@ def get_next_event(fields):
        event = list(fields)
        event.extend(['arrived', fields[21]])
        yield event
+ 
+def run()
+   pipeline = beam.Pipeline('DirectRunner')
 
-def run():
-   with beam.Pipeline('DirectRunner') as pipeline:
+   airports = (pipeline 
+      | 'airports:read' >> beam.io.ReadFromText('airports.csv.gz')
+      | 'airports:fields' >> beam.Map(lambda line: next(csv.reader([line])))
+      | 'airports:tz' >> beam.Map(lambda fields: (fields[0], addtimezone(fields[21], fields[26])))
+   )
 
-      airports = (pipeline
-         | 'airports:read' >> beam.io.ReadFromText('airports.csv.gz')
-         | 'airports:fields' >> beam.Map(lambda line: next(csv.reader([line])))
-         | 'airports:tz' >> beam.Map(lambda fields: (fields[0], addtimezone(fields[21], fields[26])))
-      )
+   flights = (pipeline 
+      | 'flights:read' >> beam.io.ReadFromText('201501_part.csv')
+      | 'flights:tzcorr' >> beam.FlatMap(tz_correct, beam.pvalue.AsDict(airports))
+   )
 
-      flights = (pipeline
-         | 'flights:read' >> beam.io.ReadFromText('201501_part.csv')
-         | 'flights:tzcorr' >> beam.FlatMap(tz_correct, beam.pvalue.AsDict(airports))
-      )
+   (flights 
+      | 'flights:tostring' >> beam.Map(lambda fields: ','.join(fields)) 
+      | 'flights:out' >> beam.io.textio.WriteToText('all_flights')
+   )
 
-      (flights
-         | 'flights:tostring' >> beam.Map(lambda fields: ','.join(fields))
-         | 'flights:out' >> beam.io.textio.WriteToText('all_flights')
-      )
+   events = flights | beam.FlatMap(get_next_event)
 
-      events = flights | beam.FlatMap(get_next_event)
+   (events 
+      | 'events:tostring' >> beam.Map(lambda fields: ','.join(fields)) 
+      | 'events:out' >> beam.io.textio.WriteToText('all_events')
+   )
 
-      (events
-         | 'events:tostring' >> beam.Map(lambda fields: ','.join(fields))
-         | 'events:out' >> beam.io.textio.WriteToText('all_events')
-      )
-
-      pipeline.run()
+   pipeline.run()
 
 if __name__ == '__main__':
    run()
